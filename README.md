@@ -47,4 +47,4 @@ catkin_make
 ```
 
 ## Usage
-Instructions are given [here]("myLib/ros_ai/scripts/How to.md") to run a containerized person tracking model with ROS and Azure Kinect.
+Instructions are given [here](./ros_ai/scripts/README.md) to run a containerized person tracking model with ROS and Azure Kinect.
