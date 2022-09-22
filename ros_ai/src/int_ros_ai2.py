@@ -7,7 +7,7 @@ from geometry_msgs.msg import PointStamped
 from cv_bridge import CvBridge, CvBridgeError
 from sensor_msgs.msg import PointCloud2
 import ros_numpy
-
+from memory_profiler import profile
 
 # import k4a
 # import docker
@@ -18,14 +18,16 @@ import json
 import numpy as np
 import cv2
 
-class integration:
+from ros_ai.msg import gait_parameters
 
+class integration:
+    # @profile
     def __init__(self):
 
         print('inside init')
         self.bridge = CvBridge()
 
-        self.addr = 'http://localhost:5000'
+        self.addr = 'http://10.21.8.22:5000'
         self.test_url =  self.addr + '/track_person'
 
         # prepare headers for http request
@@ -38,6 +40,8 @@ class integration:
         self.cv_image = None
 
         self.point = PointStamped()
+
+        self.gait_param_msg = gait_parameters()
 
 
        
@@ -54,9 +58,9 @@ class integration:
     
 
         self.pub = rospy.Publisher('/person_loc', PointStamped, queue_size=10)
-        rospy.Subscriber("/rgb/image_rect_color", Image, self.img_callback)
-        rospy.Subscriber("/points2", PointCloud2, self.pc_callback)
-
+        rospy.Subscriber("k4a/rgb/image_rect_color", Image, self.img_callback)
+        rospy.Subscriber("k4a/points2", PointCloud2, self.pc_callback)
+    #@profile
     def pc_callback(self, pc2_msg):
   
         try:
@@ -78,7 +82,7 @@ class integration:
 
             # print(self.xyz_image.shape)
 
-
+    #@profile
     def img_callback(self, data):
 
         try:
@@ -86,19 +90,46 @@ class integration:
         except CvBridgeError as e:
             print(e)
 
-
+    # @profile
     def run(self):
 
         # rate = rospy.Rate(4)
-
+        count = 0
         while  not rospy.is_shutdown():
+            # print("Before If")
             if self.cv_image is not None and self.xyz_image is not None:
-                string_img = base64.binascii.b2a_base64(self.cv_image).decode("ascii")
-                str_point_cloud = base64.binascii.b2a_base64(self.xyz_image).decode("ascii") 
+                # Uncomment below two lines if using serialization/deserialization 
+                # string_img = base64.binascii.b2a_base64(self.cv_image).decode("ascii")
+                # str_point_cloud = base64.binascii.b2a_base64(self.xyz_image).decode("ascii") 
+
+            ########## Sending Data via Read/Write Operations ##################
+                request_time_str = time.asctime(time.localtime(time.time()))
+                image_path_write = "/home/xavor/SiamRPN_Tracking_API/Data/Input/Image/{0}_{1}.jpg".format(request_time_str, count)
+                point_cloud_path_write = "/home/xavor/SiamRPN_Tracking_API/Data/Input/Point_Cloud/{0}_{1}.npy".format(request_time_str, count)
+                image_path = "/app/Data/Input/Image/{0}_{1}.jpg".format(request_time_str, count)
+                point_cloud_path = "/app/Data/Input/Point_Cloud/{0}_{1}.npy".format(request_time_str, count)
+
+
+                # image_path_write = "/home/xavor/SiamRPN_Tracking_API/Data/Input/Image/{0}_{1}.jpg".format(request_time_str, count)
+                # point_cloud_path_write = "/home/xavor/SiamRPN_Tracking_API/Data/Input/Point_Cloud/{0}_{1}.npy".format(request_time_str, count)
+
+
+                cv2.imwrite(image_path_write, self.cv_image)
+                with open(point_cloud_path_write, 'wb') as f:
+                    np.save(f, self.xyz_image)
+
+                demo = True
+                self.data = {'image': image_path, 'point_cloud': point_cloud_path, 're_initialize': False, 'demo': demo} 
+                if not count: 
+                    self.data = {'image': image_path, 'point_cloud': point_cloud_path, 're_initialize': True, 'demo': demo}
+                count += 1
+            ####################################################################
             
-                self.data = {'image': string_img, "image_shape": self.cv_image.shape, 'point_cloud': str_point_cloud, 'point_cloud_shape': self.xyz_image.shape}
+                # Uncomment this line if using serialization/deserialization 
+                # self.data = {'image': string_img, "image_shape": self.cv_image.shape, 'point_cloud': str_point_cloud, 'point_cloud_shape': self.xyz_image.shape}
 
                 t0 = time.time()
+                
                 response = requests.post(self.test_url, json=self.data, headers=self.headers)
                 print("Inference time: " + str(time.time() - t0))
                 
@@ -106,11 +137,12 @@ class integration:
                 response = json.loads(response.text)
                 # response_decoded = jsonpickle.decode(response['point'])
                 point = response['point']
+                print("Response: {0}".format(response))
 
                 self.point.header.stamp = rospy.Time.now()
                 self.point.header.frame_id = 'azure_link'
 
-                if point is None:
+                if point is None or (point[0] == 0 and point[1] == 0 and point[2] == 0):
                     self.point.point.x = -9999
                     self.point.point.y = -9999
                     self.point.point.z = -9999
@@ -119,9 +151,11 @@ class integration:
                     self.point.point.y = point[1]
                     self.point.point.z = point[2]
 
-                rospy.loginfo(response)
+                    # self.gait_param_msg.custom_str = "test custom msg"
 
-                self.pub.publish( self.point)
+                rospy.loginfo(self.point)
+
+                self.pub.publish(self.point)
 
                 # window_name = 'image'
                 # cv2.imshow(window_name, self.xyz_image.astype('uint16'))
